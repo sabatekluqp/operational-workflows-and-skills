@@ -7,4 +7,39 @@ skill_repo=${script_dir:h}
 
 "${script_dir}/sync-claude-skills"
 
+claude_home="${CLAUDE_HOME:-${HOME}/.claude}"
+skills_root="${claude_home}/skills"
+
+if [[ -d "${skills_root}" ]]; then
+  echo
+  echo "Available skills in ${skills_root}:"
+  for d in "${skills_root}"/*/; do
+    [[ -d "${d}" ]] || continue
+    name=$(basename "${d}")
+    [[ "${name}" == *.bak.* ]] && continue
+    skill_md="${d}SKILL.md"
+    desc=""
+    if [[ -f "${skill_md}" ]]; then
+      desc=$(awk '
+        /^description:[[:space:]]*/ {
+          sub(/^description:[[:space:]]*/, "")
+          gsub(/^"|"$/, "")
+          # keep only the first sentence for readability
+          if (match($0, /\. /)) {
+            print substr($0, 1, RSTART)
+          } else {
+            print
+          }
+          exit
+        }' "${skill_md}")
+    fi
+    if [[ -n "${desc}" ]]; then
+      printf "  - %-42s %s\n" "${name}" "${desc}"
+    else
+      printf "  - %s\n" "${name}"
+    fi
+  done
+  echo
+fi
+
 exec claude --add-dir "${skill_repo}" "$@"
