@@ -1,0 +1,100 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+script_dir=${0:A:h}
+codex_home="${CODEX_HOME:-${HOME}/.codex}"
+target_root="${codex_home}/skills"
+timestamp=$(date +%Y%m%d-%H%M%S)
+shared_roots=(workflows references templates reviews scripts)
+
+usage() {
+  cat <<'EOF'
+Usage: link-codex-skills [--repo-root PATH]
+
+Link repo-managed Codex skills and shared roots into CODEX_HOME.
+
+Options:
+  --repo-root PATH   Use PATH as the source repo root instead of the script's parent repo.
+  --help             Show this help text.
+EOF
+}
+
+repo_root="${script_dir:h}"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo-root)
+      [[ $# -ge 2 ]] || {
+        usage >&2
+        exit 1
+      }
+      repo_root="$2"
+      shift 2
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+source_root="${repo_root}/codex"
+
+if [[ ! -d "${source_root}" ]]; then
+  echo "Could not find a codex skill root under: ${source_root}" >&2
+  exit 1
+fi
+
+mkdir -p "${target_root}"
+
+link_path() {
+  local source_path=$1
+  local target_path=$2
+  local label=$3
+
+  if [[ -L "${target_path}" ]]; then
+    local current_target
+    current_target=$(readlink "${target_path}")
+    if [[ "${current_target}" == "${source_path}" ]]; then
+      echo "ok     ${label} -> ${source_path}"
+      return
+    fi
+
+    local backup_path="${target_path}.bak.${timestamp}"
+    mv "${target_path}" "${backup_path}"
+    echo "backup ${label} symlink -> ${backup_path}"
+  elif [[ -e "${target_path}" ]]; then
+    local backup_path="${target_path}.bak.${timestamp}"
+    mv "${target_path}" "${backup_path}"
+    echo "backup ${label} -> ${backup_path}"
+  fi
+
+  ln -s "${source_path}" "${target_path}"
+  echo "link   ${label} -> ${source_path}"
+}
+
+for root_name in "${shared_roots[@]}"; do
+  source_path="${repo_root}/${root_name}"
+  [[ -d "${source_path}" ]] || continue
+
+  target_path="${codex_home}/${root_name}"
+  link_path "${source_path}" "${target_path}" "${root_name}"
+done
+
+for source_path in "${source_root}"/*; do
+  [[ -d "${source_path}" ]] || continue
+
+  skill_name=${source_path:t}
+  target_path="${target_root}/${skill_name}"
+  link_path "${source_path}" "${target_path}" "${skill_name}"
+done
+
+echo
+echo "Repo-managed Codex skill links are installed from ${repo_root}."
+echo "Shared repo roots are linked into ${codex_home} so relative references from SKILL.md resolve correctly."
+echo "New Codex sessions will load the repo-backed skills automatically."

@@ -1,0 +1,143 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+script_dir=${0:A:h}
+repo_root=${script_dir:h}
+snapshot_root="${CLAUDE_SKILL_SNAPSHOT_ROOT:-/tmp/claude-skill-sources}"
+
+link_only=0
+dry_run=0
+
+usage() {
+  cat <<'EOF'
+Usage: sync-claude-skills [--link-only] [--dry-run]
+
+Refresh Claude skill links using the newest available skill source.
+
+Default behavior:
+  - fetch the tracked upstream
+  - compare the latest local repo state against the latest upstream commit
+  - relink from whichever side is newer
+  - fast-forward the local checkout when upstream is newer and the pull is safe
+  - otherwise materialize a temporary upstream snapshot and link from that
+
+Options:
+  --link-only   Skip remote checks and relink from the current local checkout only.
+  --dry-run     Print the chosen action without changing links or the local checkout.
+  --help        Show this help text.
+EOF
+}
+
+run_cmd() {
+  if (( dry_run )); then
+    printf '+'
+    for arg in "$@"; do
+      printf ' %q' "$arg"
+    done
+    printf '\n'
+  else
+    "$@"
+  fi
+}
+
+link_from_repo() {
+  local source_repo=$1
+  run_cmd "${script_dir}/link-claude-skills" --repo-root "${source_repo}"
+}
+
+latest_local_timestamp() {
+  setopt localoptions typesetsilent
+
+  local latest_ts rel_path abs_path file_ts
+  latest_ts=$(git -C "${repo_root}" show -s --format=%ct HEAD)
+
+  while IFS= read -r rel_path; do
+    [[ -n "${rel_path}" ]] || continue
+    abs_path="${repo_root}/${rel_path}"
+    [[ -e "${abs_path}" ]] || continue
+
+    file_ts=$(stat -f %m "${abs_path}" 2>/dev/null || echo 0)
+    if [[ "${file_ts}" -gt "${latest_ts}" ]]; then
+      latest_ts=${file_ts}
+    fi
+  done < <(git -C "${repo_root}" ls-files -m -o --exclude-standard)
+
+  echo "${latest_ts}"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --link-only)
+      link_only=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if (( link_only )); then
+  echo "Using the current local checkout only."
+  link_from_repo "${repo_root}"
+  exit 0
+fi
+
+run_cmd git -C "${repo_root}" fetch --quiet --prune
+
+upstream_ref=$(git -C "${repo_root}" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)
+if [[ -z "${upstream_ref}" ]]; then
+  echo "No tracked upstream is configured; using the current local checkout."
+  link_from_repo "${repo_root}"
+  exit 0
+fi
+
+local_effective_ts=$(latest_local_timestamp)
+remote_commit_ts=$(git -C "${repo_root}" show -s --format=%ct "${upstream_ref}")
+read -r local_only_commits remote_only_commits <<< "$(git -C "${repo_root}" rev-list --left-right --count HEAD..."${upstream_ref}")"
+dirty=0
+if [[ -n "$(git -C "${repo_root}" status --porcelain)" ]]; then
+  dirty=1
+fi
+
+if [[ "${local_effective_ts}" -ge "${remote_commit_ts}" ]]; then
+  echo "Using the current local checkout; it is at least as recent as the tracked upstream."
+  link_from_repo "${repo_root}"
+  exit 0
+fi
+
+if [[ "${dirty}" -eq 0 && "${local_only_commits}" -eq 0 ]]; then
+  echo "Tracked upstream is newer and the local checkout can fast-forward safely."
+  run_cmd git -C "${repo_root}" pull --ff-only
+  link_from_repo "${repo_root}"
+  exit 0
+fi
+
+snapshot_name="${repo_root:t}-${${upstream_ref//\//-}//:/-}"
+snapshot_dir="${snapshot_root}/${snapshot_name}"
+
+echo "Tracked upstream is newer, but the local checkout has newer-only local work too."
+echo "Relinking Claude skills from a temporary upstream snapshot without changing the local checkout."
+
+if (( dry_run )); then
+  printf '+ rm -rf %q\n' "${snapshot_dir}"
+  printf '+ mkdir -p %q\n' "${snapshot_dir}"
+  printf '+ (cd %q && git archive %q) | tar -x -C %q\n' "${repo_root}" "${upstream_ref}" "${snapshot_dir}"
+else
+  rm -rf "${snapshot_dir}"
+  mkdir -p "${snapshot_dir}"
+  (cd "${repo_root}" && git archive "${upstream_ref}") | tar -x -C "${snapshot_dir}"
+fi
+
+link_from_repo "${snapshot_dir}"
+echo "Temporary snapshot source: ${snapshot_dir}"
