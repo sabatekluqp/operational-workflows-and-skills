@@ -73,7 +73,7 @@ Use this only when the user explicitly asks for triage, draft replies, or a no-w
 - For stale comments:
   - explain what already changed in the current diff or latest commit
 - End every reply exactly as:
-  - `sethlunn's pal, Thing 2`
+  - `saba's little friend`
 
 7. Leave a clear closing state for the user.
 - Summarize which comments were fixed, which were answered without code changes, and which still need a decision.

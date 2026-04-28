@@ -13,4 +13,4 @@ Follow the shared workflow:
 - triage review comments from humans and AI against the current code
 - make safe revisions, push updates, and reply to each addressed comment unless the user asked for draft-only handling
 - review the current diff against base before taking a position
-- sign every PR reply exactly as `sethlunn's pal, Thing 2`
+- sign every PR reply exactly as `saba's little friend`
