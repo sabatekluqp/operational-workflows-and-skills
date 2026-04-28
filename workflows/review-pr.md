@@ -23,6 +23,8 @@ Default to `session-only review`.
 
 Only move into PR-writing or code-changing behavior if the user explicitly asks for that follow-up.
 
+Before posting any comment on the PR, check the merge state with `gh pr view <number> --json state,mergedAt`. If the PR is already merged or closed, surface that to the user and confirm before posting — the feedback is usually moot once the PR has shipped, and at best belongs on a follow-up ticket or PR.
+
 ## Workflow
 
 1. Identify the PR.
