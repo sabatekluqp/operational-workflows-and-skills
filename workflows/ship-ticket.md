@@ -44,6 +44,7 @@ Summarize:
 - what's on in-flight branches that overlaps (and your recommendation: stack, ignore, or coordinate)
 - the files you plan to add/modify
 - any design decisions that need the user's call (e.g. response shape, default behavior for empty input, error semantics)
+- when the change has a non-trivial flow (new execution path, interaction sequence, or rollout shape), include a draft Mermaid diagram per `pr-diagram.md` so the user can sanity-check the flow before coding. Skip for trivial diffs (rename, one-liner, config-only).
 
 Wait for the user to confirm or redirect before touching code. For trivial tickets (one-line fix, obvious rename), you can skip this gate and proceed, but still narrate the plan briefly.
 
@@ -88,6 +89,7 @@ Wait for the user to confirm or redirect before touching code. For trivial ticke
   - Issue link back to the Jira ticket
   - Test plan (what's covered, what isn't)
   - Any coordination notes (e.g. route collisions with other in-flight branches)
+  - A focused Mermaid diagram per `pr-diagram.md` when the PR changes an execution path, interaction sequence, or rollout shape. Reuse the diagram drafted in step 3 if there is one. Skip for trivial diffs.
 - Return the PR URL to the user.
 
 ### 9. Spawn an independent reviewer agent
