@@ -39,6 +39,7 @@ Use this only when the user explicitly asks for triage, draft replies, or a no-w
 - Read the PR title, body, base branch, head branch, review decision, changed files, and current branch status.
 - Fetch inline review comments, replies, unresolved threads, and top-level review summaries.
 - Focus first on unresolved, recent, or blocking comments.
+- If this PR was authored earlier in the current session (e.g. handed off from `ship-ticket`), reuse design rationale, scope decisions, and acceptance-criteria framing from session context — but still re-fetch comments, diff, CI state, and review decisions via `gh`, since those change between turns. When session memory and `gh` disagree, trust `gh`.
 
 2. Triage the review comments against the current code.
 - Separate comments into:
