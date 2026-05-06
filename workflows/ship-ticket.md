@@ -42,11 +42,16 @@ Summarize:
 - what the ticket actually asks for (acceptance criteria in plain prose)
 - what's already on master that you can reuse
 - what's on in-flight branches that overlaps (and your recommendation: stack, ignore, or coordinate)
-- the files you plan to add/modify
+- the production files you plan to add/modify
+- **the tests you plan to add/modify, listed as a concrete test plan** — surface this as a first-class part of scope, not an afterthought. For each acceptance criterion, name the test(s) that will cover it (case + Given/When/Should subject). Call out:
+  - new test files vs. extensions to existing test classes
+  - which fakes/strict mocks each new test needs
+  - which acceptance criteria are covered by unit tests vs. left to higher-level (integration/BDD/QA) tickets, and why
+  - any criterion that you cannot cover with a unit test (and what you propose instead — manual verification note in PR, integration test, follow-up ticket)
 - any design decisions that need the user's call (e.g. response shape, default behavior for empty input, error semantics)
 - when the change has a non-trivial flow (new execution path, interaction sequence, or rollout shape), include a draft Mermaid diagram per `pr-diagram.md` so the user can sanity-check the flow before coding. Skip for trivial diffs (rename, one-liner, config-only).
 
-Wait for the user to confirm or redirect before touching code. For trivial tickets (one-line fix, obvious rename), you can skip this gate and proceed, but still narrate the plan briefly.
+Wait for the user to confirm or redirect before touching code — and treat the test plan as part of what they're approving, not a side note. If they push back on tests (more cases, different layer, drop a case), update the plan before coding. For trivial tickets (one-line fix, obvious rename), you can skip this gate and proceed, but still narrate the plan briefly — including a one-line test note (e.g. "covered by existing test X; no new tests needed because…").
 
 ### 4. Create the feature branch
 

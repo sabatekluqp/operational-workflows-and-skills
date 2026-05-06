@@ -12,6 +12,7 @@ Follow the shared workflow:
 - resolve the ticket, read linked/blocking issues, and classify the work before touching code
 - scan the target repo for in-flight branches (DQ-XXXX-* / feature/TICKET-*) that overlap scope and surface collisions to the user
 - propose a plan and confirm it with the user before coding — include unknowns and the "don't stack on unmerged PRs unless asked" default
+- include a concrete test plan in that proposal — for each acceptance criterion, name the test(s) (Given/When/Should subject), call out new test files vs. extensions, and surface any criterion not covered by unit tests (and what covers it instead)
 - match the repo's existing branch naming and commit message style from `git log` / `git branch -r`
 - honor the user's memories (test conventions, logging, ticket style) when writing code, tests, and PR bodies
 - run tests locally before every commit; never push red
