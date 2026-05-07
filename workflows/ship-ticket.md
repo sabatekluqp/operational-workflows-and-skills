@@ -18,24 +18,36 @@ Accept any of:
 - **Never push red.** Tests must pass locally before every commit. If tests fail, stop and report.
 - **Match the repo's conventions.** Branch naming, commit message style, and PR template come from the repo — inspect `git log`, `git branch -r`, and `.github/pull_request_template.md` before writing your own.
 - **Honor user memories.** Test conventions (Given/When/Should, Arrange/Act/Assert, strict fakes, SUT in ctor), logging preferences (errors/warnings only for new code), and ticket/PR style notes live in `MEMORY.md`. Apply them.
+- **Keep the research phase out of main context.** Steps 1–2 (ticket fetch, branch scan, related-code grep) run in an `Explore` subagent. The main session sees only the brief, not the raw Jira/branch/file payloads. Plan-mode gate at step 3, then exit to implement.
 
 ## Workflow
 
-### 1. Resolve the ticket and build context
+### 1. Delegate context gathering to an Explore subagent
 
-- Fetch the ticket via Atlassian MCP (`mcp__atlassian__getJiraIssue`). Read summary, description, acceptance criteria (may live in a custom field), parent epic, and linked issues (blocks / blocked by / implements).
-- Note blockers — if a blocking ticket is still open, flag it before starting.
-- If the ticket references code types, endpoints, or interfaces, use `Grep` / `Glob` to locate them in the current working repo.
-- If the working directory is not already the target repo, ask the user which repo to work in rather than guessing.
+The ticket fetch, branch scan, and related-code grep produce 30–60k tokens of raw research that would otherwise live in the main context for the rest of the session — through coding, tests, PR, reviewer, and follow-up. Push that work into a subagent and keep only the brief.
 
-### 2. Scan for in-flight branches
+- If the working directory is not already the target repo, ask the user which repo to work in before delegating.
+- Spawn an `Explore` subagent (via the `Agent` tool, `subagent_type: Explore`, thoroughness: `medium`) and brief it to perform steps 1+2 inline. Required inputs:
+  - the ticket key/URL and target repo path
+  - any keywords the user mentioned (route names, class names, feature flags)
+- Required outputs (ask for the brief in this exact shape, capped at ~800 words):
+  - **Ticket summary** (1–3 sentences) and **acceptance criteria in plain prose** (bullets)
+  - **Blockers** (any open blocking tickets, with key + status)
+  - **Related branches** — each with: branch name, last commit date, files touched vs `origin/master`, overlap with this ticket, and a recommendation (stack / ignore / coordinate)
+  - **Files of interest** — paths in the current repo the implementer will likely need to Read or Edit, with one-line reason each (do not paste file contents)
+  - **Open questions** — anything the brief could not resolve and needs the user
+- The subagent should NOT paste raw Jira JSON, full branch diffs, or full file contents. Just the brief.
+- After the brief lands, Read specific files just-in-time as implementation needs them — don't pre-read everything.
 
-- Run `git fetch` then `git branch -r | grep -iE "<TICKET>|<related-ticket>|<keyword>"`.
-- For each potentially related branch, list new/modified files vs `origin/master` (or `origin/main`).
-- Look for existing scaffolding you can reuse (already on master) vs. work that's still on other branches.
-- If a related branch already implements the ticket's route/handler/class — even partially — surface the overlap. Do not silently duplicate.
+If the ticket is genuinely trivial (one-liner, obvious rename), skip the subagent and do the lookup inline; the delegation overhead isn't worth it.
 
-### 3. Propose the plan
+### 2. (folded into step 1)
+
+Branch scan and grep are part of the Explore subagent's brief. Skip this step number; renumbering the rest would churn references.
+
+### 3. Propose the plan (in plan mode)
+
+Enter plan mode (`EnterPlanMode`) before presenting the proposal. Plan mode enforces the "confirm before coding" invariant and is the natural shape for this gate — you exit it on approval and transition into implementation.
 
 Summarize:
 
@@ -51,7 +63,7 @@ Summarize:
 - any design decisions that need the user's call (e.g. response shape, default behavior for empty input, error semantics)
 - when the change has a non-trivial flow (new execution path, interaction sequence, or rollout shape), include a draft Mermaid diagram per `pr-diagram.md` so the user can sanity-check the flow before coding. Skip for trivial diffs (rename, one-liner, config-only).
 
-Wait for the user to confirm or redirect before touching code — and treat the test plan as part of what they're approving, not a side note. If they push back on tests (more cases, different layer, drop a case), update the plan before coding. For trivial tickets (one-line fix, obvious rename), you can skip this gate and proceed, but still narrate the plan briefly — including a one-line test note (e.g. "covered by existing test X; no new tests needed because…").
+Wait for the user to confirm or redirect before touching code — and treat the test plan as part of what they're approving, not a side note. If they push back on tests (more cases, different layer, drop a case), update the plan before coding. On approval, `ExitPlanMode` and proceed to step 4. For trivial tickets (one-line fix, obvious rename), you can skip plan mode and proceed, but still narrate the plan briefly — including a one-line test note (e.g. "covered by existing test X; no new tests needed because…").
 
 ### 4. Create the feature branch
 
@@ -137,8 +149,10 @@ Wait for the user to confirm or redirect before touching code — and treat the 
 
 Prefer these commands:
 
-- Jira: `mcp__atlassian__getJiraIssue(cloudId=..., issueIdOrKey=..., responseContentFormat="markdown")`
-- Branch discovery: `git fetch && git branch -r | grep -iE "<keyword>"`
-- Cross-branch inspection without checkout: `git log --oneline origin/master..origin/<branch>` and `git show origin/<branch>:<path>`
+- Context gathering: `Agent` tool with `subagent_type: Explore`, thoroughness `medium`, returning a structured brief (see step 1) — keeps raw Jira/branch/file payloads out of main context
+- Jira (inside the Explore subagent): `mcp__atlassian__getJiraIssue(cloudId=..., issueIdOrKey=..., responseContentFormat="markdown")`
+- Branch discovery (inside the Explore subagent): `git fetch && git branch -r | grep -iE "<keyword>"`
+- Cross-branch inspection without checkout (inside the Explore subagent): `git log --oneline origin/master..origin/<branch>` and `git show origin/<branch>:<path>`
+- Plan gate: `EnterPlanMode` before presenting in step 3, `ExitPlanMode` on user approval
 - PR creation: `gh pr create --draft --title "..." --body "$(cat <<'EOF' ... EOF)"`
 - Reviewer agent: `Agent` tool with `subagent_type: general-purpose`, briefed with ticket + branch + file list + specific risks
