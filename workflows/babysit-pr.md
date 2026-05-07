@@ -103,6 +103,26 @@ Prefer these GitHub queries:
 - `gh api repos/<owner>/<repo>/pulls/<number>/reviews --paginate`
 - GraphQL review-thread queries when you need resolved versus unresolved state
 
+### Reducing token usage on repeat pulls
+
+When babysitting iteratively (multiple turns on the same PR), the comments and reviews payloads dominate token cost. Apply both of these to every fetch:
+
+1. **Slim the payload with `--jq`.** The default REST response includes avatar URLs, reactions, `_links`, full user blobs, and `diff_hunk` — none of which triage needs. Project to only what's used:
+   ```
+   gh api "repos/O/R/pulls/N/comments" --paginate \
+     --jq '.[] | {id, in_reply_to_id, path, line, user: .user.login, body, updated_at, pull_request_review_id}'
+   ```
+   Same idea for `/reviews`: keep `id, user.login, state, body, submitted_at`.
+   Expected reduction: ~70–80% vs raw payload on the first pull.
+
+2. **Use a `since=` watermark on subsequent turns.** Track the newest `updated_at` seen across comments and reviews, then pass it on the next call:
+   ```
+   gh api "repos/O/R/pulls/N/comments?since=<ISO8601>" --paginate --jq '...'
+   ```
+   On warm iterations this typically returns only 1–3 new/updated items instead of the full backlog. Expected reduction on repeat pulls: ~90–95%.
+
+Also filter out threads already signed `saba's little friend` in `--jq` so prior replies never re-enter context.
+
 Prefer these local checks:
 
 - `git diff origin/<base>...HEAD -- <path>`
