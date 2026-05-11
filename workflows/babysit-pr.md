@@ -35,6 +35,19 @@ Use this only when the user explicitly asks for triage, draft replies, or a no-w
 - do not post PR replies
 - return the proposed fixes and reply text in session
 
+### Recurring Babysitting
+
+When the user wants the PR watched on a cadence (e.g. "keep checking every 20 minutes", "babysit this until reviews stop landing"), set up a `/loop` invocation rather than polling by hand:
+
+```
+/loop 20m /babysit-pr <pr-url>
+```
+
+- 15–30 min intervals are the right range for slow human review traffic; faster cadences (≤5 min) only make sense while a CI run is actively producing automated review comments.
+- The loop is session-only and dies when this Claude session exits. For overnight or multi-day babysitting that needs to survive a closed session, suggest the `/schedule` skill instead.
+- Use the slim `--jq` projections and `since=<watermark>` patterns from "Reducing token usage on repeat pulls" — recurring fires re-read the same PR every interval, so unprojected payloads compound fast.
+- Stop the loop with `CronDelete <job-id>` once the PR is merged, abandoned, or the user signals they want manual control again.
+
 ## Workflow
 
 1. Identify the PR and current state.
