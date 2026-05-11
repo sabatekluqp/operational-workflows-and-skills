@@ -18,110 +18,80 @@ Accept any of:
 - **Never push red.** Tests must pass locally before every commit. If tests fail, stop and report.
 - **Match the repo's conventions.** Branch naming, commit message style, and PR template come from the repo — inspect `git log`, `git branch -r`, and `.github/pull_request_template.md` before writing your own.
 - **Honor user memories.** Test conventions (Given/When/Should, Arrange/Act/Assert, strict fakes, SUT in ctor), logging preferences (errors/warnings only for new code), and ticket/PR style notes live in `MEMORY.md`. Apply them.
-- **Keep the research phase out of main context.** Steps 1–2 (ticket fetch, branch scan, related-code grep) run in an `Explore` subagent. The main session sees only the brief, not the raw Jira/branch/file payloads. Plan-mode gate at step 3, then exit to implement.
+- **Keep raw research out of main context.** Prefer a subagent for ticket fetch, branch scan, and initial code discovery; keep only a compact brief in the main session unless the task is trivial.
+- **Write session artifacts for multi-turn work.** When the task will continue later or switch tools, use `../references/session-artifacts.md` and refresh `checkpoint.md`, `handoff.md`, and `resume-prompt.md` in the working directory.
 
 ## Workflow
 
-### 1. Delegate context gathering to an Explore subagent
+### 1. Gather context with a brief-first pass
 
-The ticket fetch, branch scan, and related-code grep produce 30–60k tokens of raw research that would otherwise live in the main context for the rest of the session — through coding, tests, PR, reviewer, and follow-up. Push that work into a subagent and keep only the brief.
+- If the repo is unclear, ask the user which repo to use before proceeding.
+- Prefer a subagent for the first pass when the ticket is non-trivial. Its job is to fetch the ticket, scan overlapping branches, and identify likely code paths.
+- Ask the subagent to return only a compact brief:
+  - ticket summary and acceptance criteria
+  - blocking or linked issues that affect scope
+  - overlapping in-flight branches with a recommendation to stack, ignore, or coordinate
+  - files of interest with one-line reasons
+  - open questions for the user
+- Do not carry raw Jira payloads, full branch diffs, or full file contents back into the main session.
+- After the brief lands, read only the files needed for planning or implementation.
+- Skip delegation for truly trivial work.
 
-- If the working directory is not already the target repo, ask the user which repo to work in before delegating.
-- Spawn an `Explore` subagent (via the `Agent` tool, `subagent_type: Explore`, thoroughness: `medium`) and brief it to perform steps 1+2 inline. Required inputs:
-  - the ticket key/URL and target repo path
-  - any keywords the user mentioned (route names, class names, feature flags)
-- Required outputs (ask for the brief in this exact shape, capped at ~800 words):
-  - **Ticket summary** (1–3 sentences) and **acceptance criteria in plain prose** (bullets)
-  - **Blockers** (any open blocking tickets, with key + status)
-  - **Related branches** — each with: branch name, last commit date, files touched vs `origin/master`, overlap with this ticket, and a recommendation (stack / ignore / coordinate)
-  - **Files of interest** — paths in the current repo the implementer will likely need to Read or Edit, with one-line reason each (do not paste file contents)
-  - **Open questions** — anything the brief could not resolve and needs the user
-- The subagent should NOT paste raw Jira JSON, full branch diffs, or full file contents. Just the brief.
-- After the brief lands, Read specific files just-in-time as implementation needs them — don't pre-read everything.
+### 2. Keep branch scan folded into the first pass
 
-If the ticket is genuinely trivial (one-liner, obvious rename), skip the subagent and do the lookup inline; the delegation overhead isn't worth it.
+Branch discovery and related-code grep belong in the same brief-first pass. Do not pre-read everything locally just to duplicate that work.
 
-### 2. (folded into step 1)
-
-Branch scan and grep are part of the Explore subagent's brief. Skip this step number; renumbering the rest would churn references.
-
-### 3. Propose the plan (in plan mode)
-
-Enter plan mode (`EnterPlanMode`) before presenting the proposal. Plan mode enforces the "confirm before coding" invariant and is the natural shape for this gate — you exit it on approval and transition into implementation.
+### 3. Propose the plan before coding
 
 Summarize:
 
-- what the ticket actually asks for (acceptance criteria in plain prose)
-- what's already on master that you can reuse
-- what's on in-flight branches that overlaps (and your recommendation: stack, ignore, or coordinate)
-- the production files you plan to add/modify
-- **the tests you plan to add/modify, listed as a concrete test plan** — surface this as a first-class part of scope, not an afterthought. For each acceptance criterion, name the test(s) that will cover it (case + Given/When/Should subject). Call out:
-  - new test files vs. extensions to existing test classes
-  - which fakes/strict mocks each new test needs
-  - which acceptance criteria are covered by unit tests vs. left to higher-level (integration/BDD/QA) tickets, and why
-  - any criterion that you cannot cover with a unit test (and what you propose instead — manual verification note in PR, integration test, follow-up ticket)
-- any design decisions that need the user's call (e.g. response shape, default behavior for empty input, error semantics)
-- when the change has a non-trivial flow (new execution path, interaction sequence, or rollout shape), include a draft Mermaid diagram per `pr-diagram.md` so the user can sanity-check the flow before coding. Skip for trivial diffs (rename, one-liner, config-only).
+- what the ticket requires in plain prose
+- what can be reused from the current base branch
+- overlapping in-flight branches and your recommendation
+- production files you expect to change
+- the concrete test plan mapped to the acceptance criteria
+- design decisions that still need a user call
+- a draft Mermaid diagram only when the changed flow is non-trivial
 
-Wait for the user to confirm or redirect before touching code — and treat the test plan as part of what they're approving, not a side note. If they push back on tests (more cases, different layer, drop a case), update the plan before coding. On approval, `ExitPlanMode` and proceed to step 4. For trivial tickets (one-line fix, obvious rename), you can skip plan mode and proceed, but still narrate the plan briefly — including a one-line test note (e.g. "covered by existing test X; no new tests needed because…").
+Treat the test plan as part of the approval, not an afterthought. Wait for confirmation before coding unless the task is genuinely trivial.
 
 ### 4. Create the feature branch
 
-- Read recent branches with `git branch -r | head -20` and match the naming convention — common patterns: `feature/TICKET-XXXX/short-description`, `TICKET-XXXX-short-description`, `USER/TICKET-XXXX`.
-- Short description should be kebab-case and describe the deliverable, not the problem.
-- Always branch off the latest default branch:
-  ```
-  git checkout master && git pull && git checkout -b <branch-name>
-  ```
-- Use `master` or `main` based on what the repo actually uses (check `git branch --show-current` on a clean clone or `git symbolic-ref refs/remotes/origin/HEAD`).
+- Match the repo's existing remote branch naming convention.
+- Use a short kebab-case deliverable suffix.
+- Branch from the latest default branch, using `main` or `master` based on the repo's actual default.
 
 ### 5. Implement
 
-- Use `TaskCreate`/`TaskUpdate` to track sub-steps when the work is non-trivial (3+ distinct steps).
 - Follow the user's test conventions: Given/When/Should naming, `// Arrange` / `// Act` / `// Assert` section comments in each test body, strict fakes that throw on unexpected calls, SUT instantiated in the constructor.
 - Follow the user's logging preference: no Debug/Info logs in new code; only `LogError` / `LogWarning` for real error branches. If the only logger use would be Debug/Info, drop the `ILogger` dependency entirely.
 - Keep commits cohesive. Don't bundle unrelated changes.
 
 ### 6. Build and test
 
-- Run the relevant build and test commands for the language:
-  - .NET: `dotnet test --nologo` on the affected test project
-  - Node: `pnpm test` or `npm test` scoped to the package
-  - Python: `pytest <path>`
+- Run the narrowest relevant build and test commands for the changed area.
 - Do not commit until green. If tests fail, triage and fix before proceeding.
 
 ### 7. Commit
 
 - Match the repo's commit style. For this user's DQ project the pattern is `TICKET-XXXX: short description` followed by a body that explains *why* (one paragraph is enough for most tickets).
 - Stage specific files (`git add <file1> <file2>`), never `git add -A` or `git add .`.
-- Use a heredoc for the commit body and include the standard Claude co-author line.
 - Do not amend. Create new commits.
 
 ### 8. Push and open the draft PR
 
 - Push with `-u` on first push: `git push -u origin <branch-name>`.
-- Open the PR as a draft: `gh pr create --draft --title "..." --body "$(cat <<'EOF' ... EOF)"`.
-- Populate the body from the repo's PR template (`.github/pull_request_template.md`) if it exists. Fill the checklist items honestly. Include:
-  - Description of what changed and why
-  - Issue link back to the Jira ticket
-  - Test plan (what's covered, what isn't)
-  - Any coordination notes (e.g. route collisions with other in-flight branches)
-  - A focused Mermaid diagram per `pr-diagram.md` when the PR changes an execution path, interaction sequence, or rollout shape. Reuse the diagram drafted in step 3 if there is one. Skip for trivial diffs.
+- Open the PR as a draft and use the repo's PR template if one exists.
+- Include what changed, why, the Jira link, verification performed, remaining gaps, and any coordination notes.
+- Include a focused Mermaid diagram only when the PR changes an execution path, interaction sequence, or rollout shape.
 - Return the PR URL to the user.
 
 ### 9. Spawn an independent reviewer agent
 
-- Use the `Agent` tool with `general-purpose` (or `code-reviewer` if available).
-- Brief the reviewer as a cold colleague. Include:
-  - repo path, branch name, commit SHA
-  - the ticket summary + acceptance criteria
-  - the PR URL
-  - specific risks to scrutinize (contract fidelity, route conflicts, edge cases, test gaps, DI ordering)
-  - the list of files changed (so the agent doesn't have to spelunk)
-  - any context the author relied on (e.g. "DTOs defined locally because the real project has heavy transitive deps")
-  - the user's test/logging conventions so the reviewer can check adherence
-- Ask for the report categorized as **Blocking / Should-fix / Nits / Looks good**, with concrete file:line citations, capped at ~600 words.
-- Do **not** ask the reviewer to also fix the issues — reviewer produces findings; you apply them.
+- Use an independent reviewer agent.
+- Brief it with the repo path, branch, ticket summary, acceptance criteria, PR URL, changed files, notable design context, and specific risks to scrutinize.
+- Ask for findings grouped as **Blocking / Should-fix / Nits / Looks good** with concrete file:line citations.
+- The reviewer reports findings only; you decide which accepted fixes to apply.
 
 ### 10. Apply accepted feedback
 
@@ -135,6 +105,7 @@ Wait for the user to confirm or redirect before touching code — and treat the 
 - Confirm the PR is still a **draft**.
 - Tell the user it's ready for them to mark ready-for-review when they're satisfied.
 - Do not click "ready for review" yourself. Do not request reviewers yourself. Those are the user's call.
+- If the work is pausing or moving to another session/tool, refresh local session artifacts before stopping.
 
 ## Guardrails
 
@@ -149,10 +120,9 @@ Wait for the user to confirm or redirect before touching code — and treat the 
 
 Prefer these commands:
 
-- Context gathering: `Agent` tool with `subagent_type: Explore`, thoroughness `medium`, returning a structured brief (see step 1) — keeps raw Jira/branch/file payloads out of main context
+- Context gathering: a subagent that returns a structured brief instead of raw Jira, branch, and file payloads
 - Jira (inside the Explore subagent): `mcp__atlassian__getJiraIssue(cloudId=..., issueIdOrKey=..., responseContentFormat="markdown")`
 - Branch discovery (inside the Explore subagent): `git fetch && git branch -r | grep -iE "<keyword>"`
 - Cross-branch inspection without checkout (inside the Explore subagent): `git log --oneline origin/master..origin/<branch>` and `git show origin/<branch>:<path>`
-- Plan gate: `EnterPlanMode` before presenting in step 3, `ExitPlanMode` on user approval
-- PR creation: `gh pr create --draft --title "..." --body "$(cat <<'EOF' ... EOF)"`
-- Reviewer agent: `Agent` tool with `subagent_type: general-purpose`, briefed with ticket + branch + file list + specific risks
+- PR creation: `gh pr create --draft ...`
+- Reviewer agent: a general-purpose reviewer seeded with ticket context, branch, file list, and specific risks

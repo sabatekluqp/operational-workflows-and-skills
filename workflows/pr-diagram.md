@@ -2,6 +2,8 @@
 
 Turn a GitHub pull request or local diff into a concise description with a focused Mermaid flowchart or sequence diagram that explains the changed execution path, interaction order, rollout shape, or integration flow. Use this when reviewers need a fast mental model of what changed without reading a changelog.
 
+Read `../references/session-artifacts.md` when the draft will be resumed in another turn or finished by another tool.
+
 ## Inputs
 
 Accept any of:
@@ -9,13 +11,6 @@ Accept any of:
 - a PR number
 - a GitHub PR URL
 - a local branch or diff when the user wants a draft before or without opening a PR
-
-Optional inputs:
-
-- whether to update the live PR body or keep the result in session only
-- whether to preserve existing issue links, checklists, generated summaries, or rollout notes
-- whether to include a verification section
-- whether the user specifically wants a flowchart, a sequence diagram, or the best fit chosen automatically
 
 ## Defaults
 
@@ -25,7 +20,7 @@ Default to `session-only draft`.
 - preserve existing issue links, checklists, and automation blocks when editing an existing PR
 - use one Mermaid diagram unless the change genuinely has two disjoint flows that both matter
 - choose one diagram type deliberately; do not include both a flowchart and sequence diagram by default
-- keep the summary short: usually 2 to 3 sentences or 2 short paragraphs
+- keep the summary short
 - if the diff has no meaningful code-path change, say so instead of forcing a diagram
 
 ## Workflow
@@ -46,9 +41,8 @@ Default to `session-only draft`.
 
 3. Decide the diagram type and shape.
 - Use `flowchart TD` when the main job is to show branching, retries, aggregation, persistence, or a changed execution path.
-- Use `sequenceDiagram` when the reviewer mainly needs ordered interactions between actors such as caller, gateway, handler, downstream service, and side-effect systems.
-- Prefer 4 to 8 nodes for flowcharts.
-- Prefer 3 to 7 actors for sequence diagrams.
+- Use `sequenceDiagram` when the reviewer mainly needs ordered interactions between systems or actors.
+- Prefer small diagrams: roughly 4 to 8 nodes for flowcharts, 3 to 7 actors for sequences.
 - Draw one node or actor per meaningful runtime step or system role, not one per class or method.
 - Show fanout, retry, persistence, metrics, alerts, or external systems only when the PR changes that behavior or when the reviewer would misunderstand the change without them.
 - Do not diagram the whole service when the PR only touches one path.
@@ -62,16 +56,13 @@ Default to `session-only draft`.
 - Put the short summary first.
 - Add one Mermaid diagram immediately after the summary.
 - Add a short verification section when tests, local validation, or rollout caveats matter.
-- Preserve or reattach existing sections that should survive the rewrite:
-  - issue links
-  - checklists
-  - generated summary blocks such as `<!-- CURSOR_SUMMARY -->`
-  - rollout or dependency notes
+- Preserve or reattach existing issue links, checklists, generated summary blocks, and rollout or dependency notes when they matter.
 
 6. Apply the update when requested.
 - Draft the body in session first when the user wants review before mutation.
 - When the user explicitly asks to update the PR, write the body to a temp file and use `gh pr edit ... --body-file`.
 - Re-read the final PR body after mutation when the change is important or the body was heavily restructured.
+- If you stop after analysis or drafting, save the chosen diagram shape and remaining edits in local session artifacts.
 
 ## Mermaid Rules
 
@@ -79,66 +70,18 @@ Default to `session-only draft`.
 - Keep labels short and concrete.
 - Do not invent systems, branches, actors, or steps that the code or PR description does not support.
 - Keep the diagram focused on the changed path, not the whole architecture.
-- The init directive, label-length guidance, and color rules below apply to `flowchart` diagrams only. For `sequenceDiagram`, omit the init directive and `classDef` styling.
-
-For flowcharts:
-
-- Prefer simple linear or lightly branching graphs over dense subgraphs.
-- Add this init directive as the first line of every flowchart to reduce GitHub text clipping:
-
-```text
-%%{init: {'flowchart': {'padding': 30}} }%%
-```
-
-- Keep labels concise even with the init directive:
-  - max about 35 characters per line for rectangular nodes such as `["text"]` and `[["text"]]`
-  - max about 25 characters per line for stadium nodes such as `(["text"])`
-  - shorten URLs and long identifiers
-  - split longer labels with `<br/>`
-- Use exact dark-mode-safe classes when highlighting changed logic:
-
-```text
-classDef added fill:#1a7f37,stroke:#3fb950,color:#ffffff
-classDef modified fill:#7d5800,stroke:#d29922,color:#ffffff
-```
-
-- Use `added` for wholly new logic and `modified` for existing logic changed by the PR.
-
-For sequence diagrams:
-
-- Declare actors explicitly with `participant`.
-- Use `par`, `alt`, `opt`, and `loop` only when they clarify the changed behavior.
-- Keep messages short and runtime-oriented.
-- Avoid one message per helper method; group work into reviewer-meaningful interactions.
-
-Example:
-
-```mermaid
-%%{init: {'flowchart': {'padding': 30}} }%%
-flowchart TD
-    A(["POST scoring request"]) --> B["Validate input"]
-    B --> C["Fan out to models<br/>and collect results"]
-    C --> D["Return scored response"]
-```
-
-Sequence example:
-
-```mermaid
-sequenceDiagram
-    participant Caller
-    participant Gateway
-    participant Downstream
-    participant Audit
-
-    Caller->>Gateway: POST request
-    Gateway->>Downstream: Execute changed path
-    Downstream-->>Gateway: Result
-    opt Side effect
-        Gateway->>Audit: Publish audit event
-        Audit-->>Gateway: Success or logged failure
-    end
-    Gateway-->>Caller: Response
-```
+- For `flowchart`:
+  - prefer simple linear or lightly branching graphs
+  - add `%%{init: {'flowchart': {'padding': 30}} }%%` as the first line
+  - shorten long labels and split with `<br/>` when needed
+  - use `added` for wholly new logic and `modified` for changed existing logic
+  - if using classes, use:
+    - `classDef added fill:#1a7f37,stroke:#3fb950,color:#ffffff`
+    - `classDef modified fill:#7d5800,stroke:#d29922,color:#ffffff`
+- For `sequenceDiagram`:
+  - declare actors explicitly with `participant`
+  - use `par`, `alt`, `opt`, and `loop` only when they clarify the changed behavior
+  - keep messages short and runtime-oriented
 
 ## Command Patterns
 

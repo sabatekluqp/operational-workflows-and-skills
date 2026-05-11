@@ -15,7 +15,7 @@ Token budget summary:
 Follow the shared workflow:
 
 - identify the PR and current review state first
-- triage review comments from humans and AI against the current code
+- triage review comments against the current code and diff
 - make safe revisions, push updates, and reply to each addressed comment unless the user asked for draft-only handling
 - review the current diff against base before taking a position
 - sign every PR reply exactly as `saba's little friend`

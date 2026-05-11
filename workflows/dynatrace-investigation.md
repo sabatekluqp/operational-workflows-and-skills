@@ -3,10 +3,8 @@
 Use this file as the top-level router for Dynatrace work.
 
 Read `../references/dynatrace-query-patterns.md` when you need starter DQL shapes for metrics, logs, spans, events, or GUID tracing.
-Read `../explanations/dynatrace-evidence-interpretation.md` when you need help interpreting caller-vs-callee mismatch, telemetry gaps, late secondary events, or rollout-vs-code ambiguity.
 Read `../references/subagent-usage.md` when deciding whether to split the investigation into independent child scopes.
 Read `../templates/dynatrace-investigation-result.md` when this workflow is being used as a bounded child investigation that must return a structured evidence package.
-Read `../explanations/dynatrace-investigation-pattern.md` when you need the rationale for the router structure, narrow entity scope, branch selection, or bounded child investigation rules.
 
 After reading this router, read exactly one branch playbook:
 
@@ -75,11 +73,7 @@ Run these steps before branching.
   - original form
   - lowercase or uppercase variants when relevant
   - dashless GUID form only when the source system is known to emit it that way
-- Write down the exact question being answered:
-  - whether a rollout caused regression
-  - what caused an incident
-  - why a service failed
-  - where an identifier trail stops
+- Write down the exact question being answered before searching.
 
 2. Resolve the narrowest useful entity scope.
 - If the user gives a service name, start with `find_entity_by_name`.
@@ -137,46 +131,21 @@ Run these steps before branching.
 - For workers, consumers, or projections, prioritize exceptions, backlog symptoms, retries, processing failures, and logs over request-rate analysis.
 - For GUID tracing, search exact identifiers first and only relax the search if exact filters miss and there is evidence the identifier may be transformed.
 - For BI-event validation, identify the actual telemetry object and field names before concluding an event is missing.
-- Distinguish direct evidence from inference in every branch.
+- Treat these interpretation rules as defaults:
+  - caller-side failure without callee degradation usually means the error happened before the downstream call completed
+  - missing service-local logs do not prove success or absence; treat them as a telemetry gap unless another source closes the loop
+  - low-volume or custom-metric alerts need volume and denominator checks before being treated as real regressions
+  - rollout correlation is not rollout causation unless the degraded path and timing line up tightly
 
 ## Child-Investigation Contract
 
-Use this section when another workflow, such as PagerDuty incident analysis, invokes this workflow as a bounded sub-investigation.
+When used as a bounded child investigation:
 
-1. Take one narrow question.
-- Accept one exact question, not a broad incident brief.
-- Good examples:
-  - whether one service path failed because of one downstream dependency
-  - whether one database call family regressed in the incident window
-  - where one identifier trail stopped
-
-2. Keep the scope explicit.
-- Record the exact time window.
-- Record the exact entities, dependencies, objects, and fields searched.
-- Do not silently widen from one scope to another.
-
-3. Gather evidence using the matching branch.
-- Use `../workflows/dynatrace-incident-path-analysis.md` for a narrow service-path or dependency-path investigation.
-- Use `../workflows/dynatrace-service-debugging.md` for a specific failure path.
-- Use `../workflows/dynatrace-guid-trace.md` for propagation and missing-event questions.
-- Use `../workflows/dynatrace-rollout-check.md` for deployment-correlation questions.
-
-4. Return a structured result package.
-- Use `../templates/dynatrace-investigation-result.md`.
-- Include:
-  - exact question answered
-  - exact time window searched
-  - exact scoped entities and objects
-  - direct evidence
-  - interpretation
-  - confidence
-  - strongest unresolved gap
-  - next best narrow query if unresolved
-
-5. Do not act like the parent incident orchestrator.
-- Do not try to explain the whole incident from one narrow track.
-- Do not overwrite a shared parent document unless explicitly assigned sole ownership of a subpage or scratch artifact.
-- Optimize for defensible evidence.
+1. Accept one narrow question, not a broad incident brief.
+2. Keep the searched time window, entities, dependencies, objects, and fields explicit.
+3. Use the matching branch playbook for evidence gathering.
+4. Return a compact result package using `../templates/dynatrace-investigation-result.md`.
+5. Do not widen into a full incident narrative unless explicitly asked.
 
 ## Output Rules
 

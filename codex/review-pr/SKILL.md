@@ -14,7 +14,7 @@ Token budget summary:
 
 Follow the shared workflow:
 
-- identify the PR, classify its rollout role, and build the requirement context from Jira, epic, and Confluence before judging the code
+- identify the PR, classify its rollout role, and build the requirement context before judging the code
 - review the current diff against base and the current review state, treating existing comments as hypotheses to verify
 - separate real behavior findings from gate-only or process-only observations
 - produce findings in session by default

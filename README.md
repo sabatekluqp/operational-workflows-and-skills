@@ -13,6 +13,16 @@ Layout modeled on [sethlunn/operational-workflows-and-skills](https://github.com
 - `templates/` — reusable output structures.
 - `scripts/` — launchers and sync utilities.
 
+## Cross-Session Working Files
+
+For multi-turn work or Claude/Codex handoff, keep compact local state in three files:
+
+- `checkpoint.md` — where the work stands now
+- `handoff.md` — what is left to do
+- `resume-prompt.md` — the prompt to restart the work efficiently
+
+See [references/session-artifacts.md](references/session-artifacts.md) for the rules and [templates/checkpoint.md](templates/checkpoint.md), [templates/handoff.md](templates/handoff.md), and [templates/resume-prompt.md](templates/resume-prompt.md) for starter shapes.
+
 ## Using This Repo With Claude Code
 
 Symlink the repo-managed skills into your Claude home so new sessions see repo updates automatically:
@@ -80,5 +90,6 @@ These link under `${CODEX_HOME:-$HOME/.codex}/`.
 - Put reusable business logic in `workflows/`, not in skill wrappers.
 - Put stable supporting knowledge in `references/`, not in workflows unless it is procedural.
 - Put output shape in `templates/`, not process.
+- For multi-turn or cross-tool work, prefer compact local session artifacts over re-pasting large context into chat.
 - Prefer exact dates, exact ids, and exact query shapes over vague summaries.
 - Don't store secrets or credentials in the repo.

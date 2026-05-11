@@ -1,11 +1,16 @@
 ---
 name: ship-ticket
-description: "Take a Jira ticket end-to-end into a reviewed draft PR. Use when the user points at a ticket (URL or key like DQ-9031) and wants to start the work: reading the ticket and related context, scanning for in-flight branches that affect scope, proposing a plan, cutting a feature branch off the latest default branch, implementing + testing, opening a draft PR, spawning an independent reviewer agent, applying accepted feedback, and handing the PR back to the user to mark ready. Always opens the PR as a draft; never marks it ready for review autonomously."
+description: "Take a Jira ticket from first read to a reviewed draft PR. Use when the user gives a Jira key or URL and wants the work started end to end: gather ticket and repo context, check for overlapping in-flight branches, confirm the implementation and test plan, code and verify the change, open a draft PR, run an independent review pass, apply accepted feedback, and hand the draft back to the user. Never mark the PR ready for review autonomously."
 ---
 
 # Ship Ticket
 
 Read [../../workflows/ship-ticket.md](../../workflows/ship-ticket.md) before starting.
+Read [../../references/token-budget.md](../../references/token-budget.md) when you need the shared token-cost model.
+
+Token budget summary:
+- Claude: `20%` session history + artifacts, `15%` workflow/reference/template, `15%` external context, `15%` tool output, `12%` coding, `10%` runtime evidence, `8%` planning, `5%` wrapper
+- Codex: `28%` coding, `24%` build/test/verification, `14%` workflow/reference/template, `14%` tool output, `12%` session history + artifacts, `10%` external context, `8%` planning, `4%` wrapper
 
 Follow the shared workflow:
 

@@ -2,6 +2,8 @@
 
 Own a GitHub pull request after human or AI review feedback lands: triage the current review state, decide which comments need code changes versus explanation, make safe revisions, push updates, and reply to the review threads as the PR author.
 
+Read `../references/session-artifacts.md` when the PR work is likely to continue across turns or switch tools.
+
 ## Inputs
 
 Accept any of:
@@ -79,6 +81,7 @@ Use this only when the user explicitly asks for triage, draft replies, or a no-w
 7. Leave a clear closing state for the user.
 - Summarize which comments were fixed, which were answered without code changes, and which still need a decision.
 - Call out any blocker that prevented pushing or replying.
+- If the PR is not fully done, refresh `checkpoint.md`, `handoff.md`, and `resume-prompt.md`.
 
 ## Preferred Reviewers
 
@@ -105,23 +108,11 @@ Prefer these GitHub queries:
 
 ### Reducing token usage on repeat pulls
 
-When babysitting iteratively (multiple turns on the same PR), the comments and reviews payloads dominate token cost. Apply both of these to every fetch:
+When babysitting iteratively, keep the GitHub payload small:
 
-1. **Slim the payload with `--jq`.** The default REST response includes avatar URLs, reactions, `_links`, full user blobs, and `diff_hunk` — none of which triage needs. Project to only what's used:
-   ```
-   gh api "repos/O/R/pulls/N/comments" --paginate \
-     --jq '.[] | {id, in_reply_to_id, path, line, user: .user.login, body, updated_at, pull_request_review_id}'
-   ```
-   Same idea for `/reviews`: keep `id, user.login, state, body, submitted_at`.
-   Expected reduction: ~70–80% vs raw payload on the first pull.
-
-2. **Use a `since=` watermark on subsequent turns.** Track the newest `updated_at` seen across comments and reviews, then pass it on the next call:
-   ```
-   gh api "repos/O/R/pulls/N/comments?since=<ISO8601>" --paginate --jq '...'
-   ```
-   On warm iterations this typically returns only 1–3 new/updated items instead of the full backlog. Expected reduction on repeat pulls: ~90–95%.
-
-Also filter out threads already signed `saba's little friend` in `--jq` so prior replies never re-enter context.
+1. Use `--jq` to project only the fields needed for triage.
+2. Re-fetch comments and reviews with a `since=` watermark on later turns instead of pulling the full backlog again.
+3. Filter out threads already signed `saba's little friend` so prior replies do not re-enter context.
 
 Prefer these local checks:
 

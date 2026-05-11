@@ -18,4 +18,4 @@ Read [../../references/telemetry-measurability.md](../../references/telemetry-me
 
 Default to production unless the user explicitly asks for another environment.
 Default to a 7-day window aligned to the SLO Reporting dashboard.
-Always restrict the candidate service list to services owned by the asker (resolved from `CODEOWNERS` + the asker's GitHub team membership) unless the user explicitly asks for a wider scope.
+Always restrict the candidate service list to services owned by the asker unless the user explicitly asks for a wider scope.

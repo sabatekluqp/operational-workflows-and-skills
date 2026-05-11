@@ -3,6 +3,7 @@
 Review a GitHub pull request as an external reviewer: gather the requirement context from Jira, epic, and Confluence, inspect the current diff, consider the current PR review state, and produce defensible findings about correctness, scope alignment, rollout sequencing, regressions, and testing gaps.
 
 Read `../references/pr-review-context-gathering.md` before building context.
+Read `../references/session-artifacts.md` when the review will continue in another turn or be handed to another tool.
 
 ## Inputs
 
@@ -30,24 +31,14 @@ Before posting any comment on the PR, check the merge state with `gh pr view <nu
 1. Identify the PR.
 - Read the PR title, body, base branch, head branch, changed files, and linked issue references.
 - Read enough of the PR description to understand claimed scope and rollout intent.
-- Classify the rollout role before judging the code:
-  - `producer-only`
-  - `consumer-only`
-  - `stacked companion`
-  - `end-to-end`
+- Classify the rollout role before judging the code: `producer-only`, `consumer-only`, `stacked companion`, or `end-to-end`.
 
 2. Build the requirement context pack.
 - Resolve and read the Jira story.
 - Read the parent or epic when it changes scope interpretation, sequencing, or architectural intent.
 - Read directly linked Confluence pages first.
 - Search Confluence only when the intended behavior is still unclear after reading the story and PR body.
-- Reduce the result to the effective contract:
-  - required behavior
-  - explicit non-goals
-  - important design constraints
-  - follow-up dependencies or companion PR assumptions
-  - rollout constraints that affect whether a gap is a defect or intentional sequencing
-  - customer-facing or legal output paths that must be checked end to end when relevant
+- Reduce the result to the effective contract: required behavior, non-goals, design constraints, dependency assumptions, rollout constraints, and any customer-facing or legal output paths that must be checked end to end.
 
 3. Build the current review context.
 - Read inline review comments, replies, unresolved threads, and top-level review summaries.
@@ -67,6 +58,7 @@ Before posting any comment on the PR, check the merge state with `gh pr view <nu
 - Call out requirement mismatches explicitly when they diverge from Jira, epic, or Confluence design.
 - Separate real behavior findings from policy or gate observations such as quality-gate noise, style-only issues, or acceptable duplication.
 - If no findings exist, say so plainly and mention any residual testing or context gaps.
+- If the review is paused, save the current context pack and next checks in local session artifacts instead of rebuilding them later.
 
 ## Command Patterns
 
@@ -81,7 +73,6 @@ Prefer these Atlassian reads:
 
 - `searchAtlassian` to resolve a Jira key or Confluence page from a ticket-like reference
 - `getJiraIssue` for story and epic fields that define scope and acceptance criteria
-- `fetchAtlassian` when search returns an ARI you need to inspect directly
 - `getConfluencePage` for directly linked design docs when the page id is known
 
 Prefer these local checks:
