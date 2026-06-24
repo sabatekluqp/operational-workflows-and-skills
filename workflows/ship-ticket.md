@@ -18,6 +18,7 @@ Accept any of:
 - **Never push red.** Tests must pass locally before every commit. If tests fail, stop and report.
 - **Match the repo's conventions.** Branch naming, commit message style, and PR template come from the repo — inspect `git log`, `git branch -r`, and `.github/pull_request_template.md` before writing your own.
 - **Honor user memories.** Test conventions (Given/When/Should, Arrange/Act/Assert, strict fakes, SUT in ctor), logging preferences (errors/warnings only for new code), and ticket/PR style notes live in `MEMORY.md`. Apply them.
+- **Strict fakes, no exceptions.** Every new `A.Fake<T>(...)` in a unit test must pass `o => o.Strict()`. This is the established pattern across the repo and `davidsgbang` enforces it in review. If a strict fake forces you to arrange a call you'd rather leave defaulted, that's the signal — arrange it explicitly or rethink the dependency. Do not ship loose fakes in new test files.
 - **Keep raw research out of main context.** Prefer a subagent for ticket fetch, branch scan, and initial code discovery; keep only a compact brief in the main session unless the task is trivial.
 - **Write session artifacts for multi-turn work.** When the task will continue later or switch tools, use `../references/session-artifacts.md` and refresh `checkpoint.md`, `handoff.md`, and `resume-prompt.md` in the working directory.
 
@@ -63,7 +64,7 @@ Treat the test plan as part of the approval, not an afterthought. Wait for confi
 
 ### 5. Implement
 
-- Follow the user's test conventions: Given/When/Should naming, `// Arrange` / `// Act` / `// Assert` section comments in each test body, strict fakes that throw on unexpected calls, SUT instantiated in the constructor.
+- Follow the user's test conventions: Given/When/Should naming, `// Arrange` / `// Act` / `// Assert` section comments in each test body, **strict fakes** (`A.Fake<T>(o => o.Strict())` — never bare `A.Fake<T>()`) that throw on unexpected calls, SUT instantiated in the constructor.
 - Follow the user's logging preference: no Debug/Info logs in new code; only `LogError` / `LogWarning` for real error branches. If the only logger use would be Debug/Info, drop the `ILogger` dependency entirely.
 - Keep commits cohesive. Don't bundle unrelated changes.
 
@@ -71,6 +72,7 @@ Treat the test plan as part of the approval, not an afterthought. Wait for confi
 
 - Run the narrowest relevant build and test commands for the changed area.
 - Do not commit until green. If tests fail, triage and fix before proceeding.
+- Before staging test files, scan for loose fakes you authored: `rg 'A\.Fake<[^>]+>\(\)' <changed test files>`. Any hit on a fake you introduced must be converted to `A.Fake<T>(o => o.Strict())` — repeat until that grep returns nothing for your new code.
 
 ### 7. Commit
 
