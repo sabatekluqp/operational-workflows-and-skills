@@ -41,7 +41,45 @@ If the command errors or returns nothing, tell the user to run `az login` themse
 
 Also verify GitHub access is present: `gh auth status`.
 
-### 3. Discover the pipeline
+### 3. Ensure the branch is up to date with base
+
+Before triggering the pipeline, make sure the branch has the latest commits from its base (usually `master`). An out-of-date branch can surface CI regressions that are already fixed on base, or hide breakages that only appear once base commits are merged — either way, it wastes the ~20-minute deploy cycle. This runs **before** the baseline snapshot so the sha and telemetry we record match the code that actually ships.
+
+Check the branch's merge state:
+
+```bash
+gh pr view <PR URL> --json mergeStateStatus,baseRefName,headRefName,headRefOid \
+  --jq '{state: .mergeStateStatus, base: .baseRefName, head: .headRefName, sha: .headRefOid}'
+```
+
+Interpret `mergeStateStatus`:
+
+- `CLEAN` or `UNSTABLE`: branch is up to date with base. Proceed unchanged.
+- `BEHIND`: branch is behind base. Announce the action to the user, then merge base in via GitHub's Update Branch endpoint:
+
+  ```bash
+  gh pr update-branch <PR URL>
+  # fallback if the gh subcommand is unavailable in an older gh:
+  # gh api --method PUT "/repos/quadpay/quadpay-services/pulls/<number>/update-branch"
+  ```
+
+  This creates a merge commit on the head branch (no rebase, preserves history). After it returns, re-fetch `headRefOid` — the sha has changed and downstream steps (deploy marker, verdict, per-run bookkeeping) must use the new one:
+
+  ```bash
+  gh pr view <PR URL> --json headRefOid --jq .headRefOid
+  ```
+
+- `DIRTY`: real merge conflict against base. **Stop.** Surface any conflict info `gh` returns and tell the user to resolve manually. Do not attempt an auto-fix, do not deploy the stale branch — a conflict against master usually means there are semantic collisions the deploy would silently paper over.
+- `BLOCKED`, `UNKNOWN`, or anything else: warn the user with the exact state and ask before proceeding — usually means required checks, review, or branch-protection rules that this skill should not silently work around.
+
+If the user supplied a **branch with no open PR** (step 1 case), `gh pr update-branch` has no handle. Two options, in order of preference:
+
+- ask the user to open a draft PR first (recommended — enables this full skill flow), or
+- if they insist, deploy the branch as-is and note in the final verdict that base-currency was not verified.
+
+Never merge base into the branch via a local checkout — this skill runs against APIs only and does not assume the repo is cloned or on the right branch locally.
+
+### 4. Discover the pipeline
 
 Given the service name, find its Azure DevOps pipeline definition id.
 
@@ -53,9 +91,9 @@ az pipelines list \
   --query "[].{id:id, name:name, path:path}" -o json
 ```
 
-If more than one candidate returns, present the list and ask the user to pick. Cache the chosen `definitionId` for later steps. Known reference: `decision-engine = 34`.
+If more than one candidate returns, present the list and ask the user to pick. Cache the chosen `definitionId` for later steps. Known reference: `decision-engine = 34`, `compliance.api = 329`.
 
-Also fetch the stage **identifiers** from the most recent completed run — the Runs API `stagesToSkip` payload accepts identifiers, not display names (see step 5). This is the fastest way to get them without pulling the pipeline YAML:
+Also fetch the stage **identifiers** from the most recent completed run — the Runs API `stagesToSkip` payload accepts identifiers, not display names (see step 6). This is the fastest way to get them without pulling the pipeline YAML:
 
 ```bash
 recentBuild=$(az rest --method GET \
@@ -71,7 +109,7 @@ az rest --method GET \
 
 Observed identifiers on Zip `.NET service` pipelines (compliance.api, decision-engine, and siblings share this shape): `Build` (Build, test solution), `CheckEphemeral` (Check ephemeral), `BuildImage` (Build, publish docker image), `ci` (Deploy ci), `ci_bdd_<service>_CI` (BDD stage), `ut` / `ut_2` (Deploy ut / ut_2), `pd` (Deploy pd), `GitHubRelease_` (GitHub release). If the queried run does not match this shape, use the identifiers you just fetched and warn the user that the pipeline layout diverges from the defaults this skill was designed against.
 
-### 4. Baseline snapshot (pre-deploy)
+### 5. Baseline snapshot (pre-deploy)
 
 Establish a comparison anchor before the pipeline runs. Dev traffic is usually sparse and BDD-driven, so this is often qualitative — say so explicitly if the pre-window has almost no data.
 
@@ -91,13 +129,13 @@ Establish a comparison anchor before the pipeline runs. Dev traffic is usually s
 
 - Grab the last-30-minutes counts on both entities: failure count, exception count, top error operations. Use `list_problems` for both entities and the window as well.
 - Send a deploy-start marker so the timeline is annotated for future investigations:
-  - `send_event` with `eventType: CUSTOM_DEPLOYMENT`, a distinctive title (e.g. `deploy-and-validate: <service> <branch> run <runId> start`), and the .NET-agent service entity attached via `entitySelector`. Include the branch, commit SHA, PR URL, and build number as `properties`.
+  - `send_event` with `eventType: CUSTOM_DEPLOYMENT`, a distinctive title (e.g. `deploy-and-validate: <service> <branch> run <runId> start`), and the .NET-agent service entity attached via `entitySelector`. Include the branch, commit SHA (post-update-branch, from step 3), PR URL, and build number as `properties`.
 
 Write down the pre-deploy timestamp — you will use it as the anchor for both the post-deploy comparison window and the topology-neighbor scan.
 
-### 5. Trigger the pipeline with the right stages
+### 6. Trigger the pipeline with the right stages
 
-`az pipelines run` uses the older builds API and does not accept `stagesToSkip`. Use the Runs API through `az rest`. **`stagesToSkip` takes stage identifiers, not display names** — passing the display name `"Deploy ut"` returns `PipelineValidationException: 'Deploy ut' is not a valid stage to skip.` Use the identifiers from step 3.
+`az pipelines run` uses the older builds API and does not accept `stagesToSkip`. Use the Runs API through `az rest`. **`stagesToSkip` takes stage identifiers, not display names** — passing the display name `"Deploy ut"` returns `PipelineValidationException: 'Deploy ut' is not a valid stage to skip.` Use the identifiers from step 4.
 
 Write the payload to a file first — inline JSON quoting via `--body` is fragile in zsh (backticks, `$` expansion, embedded quotes):
 
@@ -122,11 +160,11 @@ az rest --method POST \
 
 Notes:
 
-- Identifiers are case-sensitive. If step 3 surfaced a different set, substitute them here — the Zip default is `["ut", "ut_2", "pd", "GitHubRelease_"]`.
+- Identifiers are case-sensitive. If step 4 surfaced a different set, substitute them here — the Zip default is `["ut", "ut_2", "pd", "GitHubRelease_"]`.
 - Some pipelines do not have a BDD stage. Do not add one — just proceed and record "no BDD stage for this pipeline" in the final report.
 - Capture `id` (runId) and `_links.web.href` from the response. Show the user the run URL immediately so they can watch too.
 
-### 6. Poll the run
+### 7. Poll the run
 
 Poll every 30–60 seconds until the run reaches a terminal state. Do not sleep less than 60 seconds — the deploy takes 20–40 minutes and short-sleep polling wastes context.
 
@@ -166,7 +204,7 @@ done
 
 Report a short status update at each stage transition (`Build, test solution`, `Deploy ci`, `BDD - <service> (CI)`, `Check ephemeral`). Do not narrate every poll.
 
-### 7. Pull stage-level results
+### 8. Pull stage-level results
 
 When the run is terminal, retrieve per-stage timing and result:
 
@@ -184,7 +222,7 @@ Record:
 - `bddResult`: succeeded / failed / partiallySucceeded / no-BDD-stage.
 - Any failed stage other than BDD — capture and surface it, but the Dynatrace analysis still runs because there may already be usable telemetry.
 
-### 8. BDD failure triage (skip if no BDD stage or BDD succeeded)
+### 9. BDD failure triage (skip if no BDD stage or BDD succeeded)
 
 For each failed BDD task:
 
@@ -216,25 +254,25 @@ Cross-reference each failing scenario against the PR diff (files, changed classe
 
 Always cite the specific PR file(s) or diff hunk(s) that motivate a `related` classification.
 
-### 9. Dynatrace post-deploy check for the deployed service
+### 10. Dynatrace post-deploy check for the deployed service
 
 Anchor the post-window on `deployCompletedAt`. The observation window is `[bddStartedAt, bddCompletedAt + 2 minutes]` when BDD ran, otherwise `[deployCompletedAt, deployCompletedAt + 5 minutes]` — the user's guidance is that BDD produces immediate activity, so a short trailing buffer is enough.
 
 Filter every query by:
 
 - cluster: `zip-aks-cluster-dev-green` (via the environment binding for the MCP tool — this cluster is the dev tenant)
-- `dt.entity.service` — use **both** entity ids from step 4 (`.NET-agent` + `OTel`) via `in(dt.entity.service, array(...))`. The same pod produces telemetry to both — dropping one means missing half the coverage.
+- `dt.entity.service` — use **both** entity ids from step 5 (`.NET-agent` + `OTel`) via `in(dt.entity.service, array(...))`. The same pod produces telemetry to both — dropping one means missing half the coverage.
 - object-dependent version filter:
   - **OTel-view spans / exceptions**: filter by `service.version == "<build number>"` (e.g. `20260903.5`). This is the strongest signal that a failure belongs to _this deploy_ vs. ambient noise on shared endpoints.
   - **.NET-agent-view spans / exceptions**: `service.version` is **not populated** on this entity at Zip. Fall back to time-window + entity filter only. Same for logs (logs never carry `service.version`).
-  - **logs**: time-window filtering is the default across both entity views. When you need to prove a log line came from _this_ deploy specifically, correlate via `trace_id` — pull the trace ids from step 9.3's version-filtered OTel spans, then `filter trace_id in [...]` (or the Zip-specific field `p.trace_id`) on the log query. Do not claim a log line is from this deploy solely because it fell in the post-window.
+  - **logs**: time-window filtering is the default across both entity views. When you need to prove a log line came from _this_ deploy specifically, correlate via `trace_id` — pull the trace ids from step 10.3's version-filtered OTel spans, then `filter trace_id in [...]` (or the Zip-specific field `p.trace_id`) on the log query. Do not claim a log line is from this deploy solely because it fell in the post-window.
 
 Run these in this order:
 
 1. `list_problems` scoped to both entities and the post-window. Any new problems opened after `deployCompletedAt` are highest signal.
 2. `list_exceptions` scoped to both entities and the post-window. Apply the `service.version` filter only when the exception rows come from the OTel entity.
-3. Top failing operations DQL (see `dynatrace-query-patterns.md#top-failing-operations`) run twice: once version-filtered on the OTel entity (highest confidence), once time-window-only on the .NET-agent entity (broader coverage). Collect trace ids from the OTel side for step 9.4's log correlation.
-4. Error / warning log search for both entities in the post-window. Skip Info / Debug (per user memory). Default: time-window only. If step 9.2 or 9.3 surfaced failing traces, re-run this filtered by those `trace_id`s (`p.trace_id` on Zip log records) to prove which log lines belong to this deploy.
+3. Top failing operations DQL (see `dynatrace-query-patterns.md#top-failing-operations`) run twice: once version-filtered on the OTel entity (highest confidence), once time-window-only on the .NET-agent entity (broader coverage). Collect trace ids from the OTel side for step 10.4's log correlation.
+4. Error / warning log search for both entities in the post-window. Skip Info / Debug (per user memory). Default: time-window only. If step 10.2 or 10.3 surfaced failing traces, re-run this filtered by those `trace_id`s (`p.trace_id` on Zip log records) to prove which log lines belong to this deploy.
 5. Kubernetes events check for the service's workloads in the post-window. Prefer DQL over `get_kubernetes_events` for tight scoping — Zip runs multiple workloads per logical service (e.g. `<service>`, `<service>-primary`, `<service>-qp-master`). Query pattern:
 
    ```text
@@ -249,18 +287,18 @@ Run these in this order:
 
 For each finding, capture: timestamp, entity, operation or span name, exception type / status code, and count.
 
-### 10. Impacted services via topology
+### 11. Impacted services via topology
 
 Use Dynatrace call topology (Smartscape) to identify neighbors:
 
 - upstream (services that call the deployed service)
 - downstream (services the deployed service calls)
 
-For each neighbor in the post-window, re-run steps 9.1–9.3 (problems, exceptions, top failing operations) scoped to that neighbor. Do not filter neighbors by version — the change is not deployed there — but do keep the same time window.
+For each neighbor in the post-window, re-run steps 10.1–10.3 (problems, exceptions, top failing operations) scoped to that neighbor. Do not filter neighbors by version — the change is not deployed there — but do keep the same time window.
 
 Keep the neighbor list tight (typically 2–5 first-hop entities). If Smartscape returns dozens, cap to the ones with actual call volume to/from the deployed service in the pre-window baseline.
 
-### 11. Relatedness judgment
+### 12. Relatedness judgment
 
 For every error, exception, K8s event, or neighbor regression, classify it as:
 
@@ -270,7 +308,7 @@ For every error, exception, K8s event, or neighbor regression, classify it as:
 
 Cite the diff line, span, or exception message that supports each `related` call. Vague relatedness claims are worse than none.
 
-### 12. Verdict
+### 13. Verdict
 
 Emit one of:
 
@@ -287,6 +325,10 @@ Give the user a single structured report. Lead with the verdict, then the eviden
 
 ```
 Verdict: <one of the four>
+
+Branch currency
+- mergeStateStatus at start: <CLEAN | BEHIND → updated | DIRTY → stopped | ...>
+- deployed sha: <sha> (post-update-branch if applicable)
 
 Pipeline
 - run: <URL>
@@ -333,5 +375,7 @@ Then stop. Do not offer to merge, mark ready-for-review, or trigger a follow-up 
 - Never skip `Check ephemeral` or `Deploy ci` — those are the stages that produce the telemetry the skill is checking. Only the downstream promotion stages are skippable.
 - Never widen the Dynatrace cluster scope. `zip-aks-cluster-dev-green` is the entire allowed surface.
 - Never re-run a pipeline automatically on failure. Report the failure and let the user decide.
+- Never resolve merge conflicts. If step 3 returns `DIRTY`, stop and hand the branch back to the user — a conflict against base is a semantic signal, not a mechanical one.
+- Never merge base into the branch via a local checkout. `gh pr update-branch` (or the equivalent `/update-branch` REST call) is the only supported path — the skill does not assume the repo is cloned locally.
 - If `az account show` fails midway (token expired), stop and ask the user to re-login. Do not attempt device-code login from inside the skill.
 - If polling has been running for more than 60 minutes, stop and check whether the pipeline is genuinely stuck (agent starvation, external dependency). Do not sit in a poll loop indefinitely.
