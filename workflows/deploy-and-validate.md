@@ -319,6 +319,62 @@ Emit one of:
 
 Never move from `blocked` or `needs investigation` to `safe` by re-running queries with wider filters. If a finding is real, it stays in the report.
 
+### 14. Restore CI (offer rollback to master)
+
+The branch's build is still deployed to `<service>` in dev-green even after you emit a bad verdict. If that build is broken, every other developer running BDDs against dev-green for the same service inherits the breakage. This step offers to re-deploy `master` on the same pipeline so CI returns to a known-good state.
+
+Fires when any of:
+
+- verdict is `blocked` and the block is caused by `related` findings on the deployed service (BDD failures, exceptions, crashlooping pods, opened problems all tied to the diff)
+- verdict is `needs investigation` with at least one `related` finding
+- `Deploy ci` stage itself failed (regardless of BDD outcome — the CI environment is in a partial-deploy state)
+
+Does not fire when:
+
+- verdict is `safe to merge` or `safe to merge with caveats`
+- the only findings are `unrelated` or `unclear` — the deploy didn't cause the breakage, so rolling back doesn't fix anything
+
+**Always ask the user before rolling back.** Never roll back silently. Message shape:
+
+- name the specific `related` findings the deploy left behind (or the `Deploy ci` failure)
+- explain that leaving the branch build in `Deploy ci` breaks CI for other developers testing other PRs on `<service>`
+- offer to re-deploy `master` on the same pipeline with the same `stagesToSkip` to restore a known-good build
+
+If the user declines: record "rollback declined by user" in the final report and stop. Do not touch CI.
+
+If the user confirms:
+
+1. Trigger the rollback — same payload shape as step 6, but with `refName: refs/heads/master`:
+
+   ```bash
+   cat > /tmp/deploy-and-validate-rollback.json <<'EOF'
+   {
+     "stagesToSkip": ["ut", "ut_2", "pd", "GitHubRelease_"],
+     "resources": {
+       "repositories": {
+         "self": { "refName": "refs/heads/master" }
+       }
+     }
+   }
+   EOF
+
+   az rest --method POST \
+     --resource "499b84ac-1321-427f-aa17-267ca6975798" \
+     --uri "https://dev.azure.com/quadpay/quadpay-services/_apis/pipelines/<definitionId>/runs?api-version=7.0" \
+     --headers "Content-Type=application/json" \
+     --body @/tmp/deploy-and-validate-rollback.json
+   ```
+
+2. Poll to completion using the same Monitor pattern from step 7, with the rollback runId swapped in.
+
+3. Do **not** run steps 5, 10, 11, or 12 on the rollback. This is a state-restoration action, not a validation. The Dynatrace analysis of the branch already happened; re-analyzing master would just re-verify master and burn another ~20 minutes.
+
+4. Report the rollback outcome in the final report:
+   - all stages succeeded → `CI restored on master build <build#>`
+   - any stage failed → `CI rollback also failed — master may have an unrelated issue, or the CI env is beyond auto-repair. Escalate to the service owner and do not attempt further deploys from this skill.`
+
+Then hand back to the user with the combined report (original verdict + rollback outcome). Do not loop — one rollback attempt per skill invocation.
+
 ## Output shape
 
 Give the user a single structured report. Lead with the verdict, then the evidence.
@@ -365,9 +421,15 @@ Windows searched
 - baseline: <pre-window>
 - post-deploy: <post-window>
 - cluster: zip-aks-cluster-dev-green
+
+Rollback (only shown when step 14 fired)
+- trigger: <blocked-with-related | needs-investigation-with-related | deploy-ci-failure>
+- decision: <accepted | declined by user>
+- run URL: <if accepted>
+- result: <CI restored on master build <build#> | CI rollback failed — <note>>
 ```
 
-Then stop. Do not offer to merge, mark ready-for-review, or trigger a follow-up deploy without the user asking.
+Then stop. Do not offer to merge, mark ready-for-review, or trigger any further deploys without the user asking.
 
 ## Guardrails
 
@@ -375,6 +437,8 @@ Then stop. Do not offer to merge, mark ready-for-review, or trigger a follow-up 
 - Never skip `Check ephemeral` or `Deploy ci` — those are the stages that produce the telemetry the skill is checking. Only the downstream promotion stages are skippable.
 - Never widen the Dynatrace cluster scope. `zip-aks-cluster-dev-green` is the entire allowed surface.
 - Never re-run a pipeline automatically on failure. Report the failure and let the user decide.
+- Never trigger the step-14 rollback without explicit user confirmation. Even when the verdict is clearly `blocked` with `related` findings, the user must say "yes, roll back" — the rollback is a shared-system action that can surprise anyone else who was intentionally testing against the broken CI build.
+- Never run the Dynatrace validation cycle (steps 5, 10-12) on a rollback deploy. The rollback is state restoration, not validation. Polling and per-stage reporting is enough.
 - Never resolve merge conflicts. If step 3 returns `DIRTY`, stop and hand the branch back to the user — a conflict against base is a semantic signal, not a mechanical one.
 - Never merge base into the branch via a local checkout. `gh pr update-branch` (or the equivalent `/update-branch` REST call) is the only supported path — the skill does not assume the repo is cloned locally.
 - If `az account show` fails midway (token expired), stop and ask the user to re-login. Do not attempt device-code login from inside the skill.

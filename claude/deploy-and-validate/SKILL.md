@@ -1,6 +1,6 @@
 ---
 name: deploy-and-validate
-description: "Deploy a branch or PR to CI in Azure DevOps. First ensures the branch is current with base (runs gh pr update-branch when BEHIND, stops if DIRTY), then triggers Build → Docker → Deploy ci → BDD → Check ephemeral and polls to completion. Once green, validates in Dynatrace (dev cluster zip-aks-cluster-dev-green) — problems, exceptions, error traces, K8s events for the deployed service and its topology-derived neighbors, plus BDD failure triage. Judge which findings look related to the PR diff and emit a merge-readiness verdict. Use before merging a PR when you want dev-environment proof the change is safe."
+description: "Deploy a branch or PR to CI in Azure DevOps. First ensures the branch is current with base (runs gh pr update-branch when BEHIND, stops if DIRTY), then triggers Build → Docker → Deploy ci → BDD → Check ephemeral and polls to completion. Once green, validates in Dynatrace (dev cluster zip-aks-cluster-dev-green) — problems, exceptions, error traces, K8s events for the deployed service and its topology-derived neighbors, plus BDD failure triage. Judge which findings look related to the PR diff and emit a merge-readiness verdict. If the verdict is blocked or needs-investigation with related findings (or Deploy ci itself failed), offer to re-deploy master to restore CI to a known-good state — asks first, never rolls back silently. Use before merging a PR when you want dev-environment proof the change is safe."
 ---
 
 # Deploy And Validate
